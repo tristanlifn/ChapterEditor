@@ -96,8 +96,59 @@ fun AppContent() {
                 }
             }
 
-            Column {
-
+            Column(modifier = Modifier.padding(8.dp)) {
+                Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column { // TODO: add onValueChange method
+                        OutlinedTextField(
+                            value = metadata.value.date,
+                            onValueChange = { },
+                            label = { Text("Date") },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = metadata.value.title,
+                            onValueChange = { },
+                            label = { Text("Title") },
+                            singleLine = true
+                        )
+                    }
+                    Column {
+                        OutlinedTextField(
+                            value = metadata.value.artist,
+                            onValueChange = { },
+                            label = { Text("Artist") },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = "",
+                            onValueChange = { },
+                            label = { Text("") },
+                            singleLine = true
+                        )
+                    }
+                    Column {
+                        OutlinedTextField(
+                            value = metadata.value.album,
+                            onValueChange = { },
+                            label = { Text("Series") },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = metadata.value.albumArtist,
+                            onValueChange = { },
+                            label = { Text("Series artist") },
+                            singleLine = true
+                        )
+                    }
+                    Column {
+                        OutlinedTextField(
+                            value = metadata.value.comment,
+                            onValueChange = { },
+                            label = { Text("Comment") },
+                            singleLine = false
+                        )
+                    }
+                }
 
                 if (metadata.value.chapters.isEmpty()) {
                     BlankSlate()
