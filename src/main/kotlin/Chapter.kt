@@ -3,5 +3,4 @@ data class Chapter(
     val title: String,
     val startTime: Int,
     val endTime: Int,
-    val timebase: String
 )

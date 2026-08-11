@@ -22,6 +22,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
+    testImplementation("org.jetbrains.kotlin:kotlin-test:2.1.20")
 }
 
 compose.desktop {
