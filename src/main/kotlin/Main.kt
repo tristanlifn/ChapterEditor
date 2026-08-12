@@ -1,3 +1,6 @@
+import models.Chapter
+import models.Metadata
+import popups.writeMetadataToFile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
@@ -43,16 +47,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import java.awt.FileDialog
-import java.awt.Frame
+import popups.selectAudioFile
 import java.io.File
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.createDirectory
 
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Chapter Editor",
+        title = "Models.Chapter Editor",
         state = rememberWindowState()
     ) {
         MaterialTheme(colorScheme = darkColorScheme()) {
@@ -63,9 +65,14 @@ fun main() = application {
 
 @Composable
 fun AppContent() {
-    val metadata = remember { mutableStateOf(Metadata(mutableStateListOf(), timeBase = "1/1000",
-        date = "", title = "", artist = "", album = "", albumArtist = "", comment = "")) }
+    var metadata = remember { mutableStateOf(
+        Metadata(
+            mutableStateListOf(), timeBase = "1/1000",
+            date = "", title = "", artist = "", album = "", albumArtist = "", comment = ""
+        )
+    ) }
     var nextId by remember { mutableIntStateOf(0) }
+    var showExportPopup by remember { mutableStateOf(false) }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -77,7 +84,7 @@ fun AppContent() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Chapter Editor", style = MaterialTheme.typography.headlineMedium)
+                Text("Models.Chapter Editor", style = MaterialTheme.typography.headlineMedium)
                 Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(onClick = {
                         getMetadataFromFile(metadata.value) { metadata.value = it }
@@ -85,6 +92,13 @@ fun AppContent() {
                         Icon(Icons.Filled.FileOpen, "Open file")
                         Spacer(Modifier.width(8.dp))
                         Text("Import metadata")
+                    }
+                    Button(onClick = {
+                        showExportPopup = true
+                    }) {
+                        Icon(Icons.Filled.FileUpload, "Write to file")
+                        Spacer(Modifier.width(8.dp))
+                        Text("Export metadata to audio file")
                     }
                     Button(onClick = {
                         buildMetadataFile(metadata)
@@ -102,7 +116,8 @@ fun AppContent() {
                         else
                             last + 1
 
-                        val chapter = Chapter(id = nextId, title = "Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
+                        val chapter =
+                            Chapter(id = nextId, title = "Models.Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
                         metadata.value.chapters.add(chapter)
                         nextId += 1
                     }) {
@@ -142,6 +157,16 @@ fun AppContent() {
                 }
             }
         }
+        if (showExportPopup) {
+            writeMetadataToFile(metadata = metadata, onDismiss = { showExportPopup = false }, onResetState = {
+                metadata = mutableStateOf(
+                    Metadata(
+                        mutableStateListOf(), timeBase = "1/1000",
+                        date = "", title = "", artist = "", album = "", albumArtist = "", comment = ""
+                    )
+                )
+            })
+        }
     }
 }
 
@@ -151,7 +176,7 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
     var expanded by remember { mutableStateOf(false) }
 
     Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column { // TODO: add onValueChange method
+        Column {
             OutlinedTextField(
                 value = metadata.value.title,
                 onValueChange = { onChange(metadata.value.copy(title = it)) },
@@ -284,20 +309,8 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
 }
 
 fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
-    val parent = Frame.getFrames().firstOrNull { it.isShowing }
-    val audioExtensions = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")
-    val dialog = FileDialog(parent, "Select an audio file to import metadata from", FileDialog.LOAD).apply {
-        setFilenameFilter { _, name ->
-            name.substringAfterLast('.', "").lowercase() in audioExtensions
-        }
-    }
-
-    dialog.isVisible = true
-
-    val filePath = dialog.file
-    if (filePath != null) {
-        getMetadataFromFile(File(dialog.directory, filePath).absolutePath, metadata, onChange)
-    }
+    val filePath = selectAudioFile() ?: return
+    getMetadataFromFile(filePath, metadata, onChange)
 }
 
 fun getMetadataFromFile(filePath: String, metadata: Metadata, onChange: (Metadata) -> Unit) {
@@ -363,32 +376,28 @@ fun mapMetadataFile(file: File, metadata: Metadata, onChange: (Metadata) -> Unit
     onChange(result)
 }
 
-fun buildMetadataFile(metadata: MutableState<Metadata>) {
-    val homeDir = System.getProperty("user.home") ?: System.getenv("HOME") ?: System.getProperty("user.dir")
-    val outFile = File("$homeDir/Downloads/metadata.txt")
-    outFile.createNewFile()
-
+fun buildMetadataContent(metadata: Metadata): String {
     var content =
                 ";FFMETADATA1\n" +
                 "encoder=Lavf63.1.100\n"
 
-    if (metadata.value.date.isNotBlank())
-        content += "date=${metadata.value.date}\n"
-    if (metadata.value.title.isNotBlank())
-        content += "title=${metadata.value.title}\n"
-    if (metadata.value.artist.isNotBlank())
-        content += "artist=${metadata.value.artist}\n"
-    if (metadata.value.album.isNotBlank())
-        content += "album=${metadata.value.album}\n"
-    if (metadata.value.albumArtist.isNotBlank())
-        content += "album_artist=${metadata.value.albumArtist}\n"
-    if(metadata.value.comment.isNotBlank())
-        content += "comment=${metadata.value.comment}\n"
+    if (metadata.date.isNotBlank())
+        content += "date=${metadata.date}\n"
+    if (metadata.title.isNotBlank())
+        content += "title=${metadata.title}\n"
+    if (metadata.artist.isNotBlank())
+        content += "artist=${metadata.artist}\n"
+    if (metadata.album.isNotBlank())
+        content += "album=${metadata.album}\n"
+    if (metadata.albumArtist.isNotBlank())
+        content += "album_artist=${metadata.albumArtist}\n"
+    if (metadata.comment.isNotBlank())
+        content += "comment=${metadata.comment}\n"
 
-    for (chapter in metadata.value.chapters){
+    for (chapter in metadata.chapters){
         val chapterString =
                     "[CHAPTER]\n" +
-                    "TIMEBASE=${metadata.value.timeBase}\n" +
+                    "TIMEBASE=${metadata.timeBase}\n" +
                     "START=${chapter.startTime}\n" +
                     "END=${chapter.endTime}\n" +
                     "title=${chapter.title}\n"
@@ -396,7 +405,14 @@ fun buildMetadataFile(metadata: MutableState<Metadata>) {
         content += chapterString
     }
 
-    outFile.writeText(content)
+    return content
+}
+
+fun buildMetadataFile(metadata: MutableState<Metadata>) {
+    val homeDir = System.getProperty("user.home") ?: System.getenv("HOME") ?: System.getProperty("user.dir")
+    val outFile = File("$homeDir/Downloads/metadata.txt")
+    outFile.createNewFile()
+    outFile.writeText(buildMetadataContent(metadata.value))
 }
 
 fun List<String>.runCommand(workingDir: File) {

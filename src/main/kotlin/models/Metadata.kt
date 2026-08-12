@@ -1,3 +1,5 @@
+package models
+
 data class Metadata(
     val chapters: MutableList<Chapter>,
     val timeBase: String,
