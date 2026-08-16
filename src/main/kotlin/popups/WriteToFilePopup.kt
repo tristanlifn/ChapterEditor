@@ -27,9 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import buildMetadataContent
 import models.Metadata
-import java.awt.FileDialog
-import java.awt.Frame
 import java.io.File
+import selectAudioFile
 
 class FfmpegProgress {
     var writing by mutableStateOf(false)
@@ -165,21 +164,6 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
             }
         }
     )
-}
-
-fun selectAudioFile(): String? {
-    val parent = Frame.getFrames().firstOrNull { it.isShowing }
-    val audioExtensions = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")
-    val dialog = FileDialog(parent, "Select an audio file", FileDialog.LOAD).apply {
-        setFilenameFilter { _, name ->
-            name.substringAfterLast('.', "").lowercase() in audioExtensions
-        }
-    }
-
-    dialog.isVisible = true
-
-    val filePath = dialog.file ?: return null
-    return File(dialog.directory, filePath).absolutePath
 }
 
 fun runFfmpegWithProgress(

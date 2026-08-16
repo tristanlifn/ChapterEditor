@@ -3,6 +3,7 @@ import models.Metadata
 import popups.writeMetadataToFile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,8 +20,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -43,13 +46,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import popups.selectAudioFile
+import java.awt.FileDialog
+import java.awt.Frame
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.awt.KeyboardFocusManager
 
 fun main() = application {
     Window(
@@ -74,9 +80,38 @@ fun AppContent() {
     var nextId by remember { mutableIntStateOf(0) }
     var showExportPopup by remember { mutableStateOf(false) }
 
+    val actions = listOf(
+        AppAction("Import metadata", Icons.Filled.FileOpen) {
+            getMetadataFromFile(metadata.value) { metadata.value = it }
+        },
+        AppAction("Export metadata to audio file", Icons.Filled.FileUpload) {
+            showExportPopup = true
+        },
+        AppAction("Build metadata file", Icons.Filled.FileDownload) {
+            buildMetadataFile(metadata)
+        },
+        AppAction("Add chapter", Icons.Default.Add) {
+            val startTime = metadata.value.chapters.lastOrNull()?.endTime ?: 0
+            val last: Int? = metadata.value.chapters.lastOrNull()?.id
+
+            nextId = if (last == null)
+                0
+            else
+                last + 1
+
+            val chapter =
+                Chapter(id = nextId, title = "Models.Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
+            metadata.value.chapters.add(chapter)
+            nextId += 1
+        }
+    )
+
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+        BoxWithConstraints {
+            val useMenu = maxWidth < 1200.dp
+
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
@@ -85,45 +120,13 @@ fun AppContent() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Models.Chapter Editor", style = MaterialTheme.typography.headlineMedium)
-                Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = {
-                        getMetadataFromFile(metadata.value) { metadata.value = it }
-                    }) {
-                        Icon(Icons.Filled.FileOpen, "Open file")
-                        Spacer(Modifier.width(8.dp))
-                        Text("Import metadata")
-                    }
-                    Button(onClick = {
-                        showExportPopup = true
-                    }) {
-                        Icon(Icons.Filled.FileUpload, "Write to file")
-                        Spacer(Modifier.width(8.dp))
-                        Text("Export metadata to audio file")
-                    }
-                    Button(onClick = {
-                        buildMetadataFile(metadata)
-                    }) {
-                        Icon(Icons.Filled.FileDownload, "Build metadata file")
-                        Spacer(Modifier.width(8.dp))
-                        Text("Build metadata file")
-                    }
-                    Button(onClick = {
-                        val startTime = metadata.value.chapters.lastOrNull()?.endTime ?: 0
-                        val last: Int? = metadata.value.chapters.lastOrNull()?.id
-
-                        nextId = if (last == null)
-                            0
-                        else
-                            last + 1
-
-                        val chapter =
-                            Chapter(id = nextId, title = "Models.Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
-                        metadata.value.chapters.add(chapter)
-                        nextId += 1
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add chapter")
-                        Spacer(Modifier.size(8.dp))
-                        Text("Add chapter")
+                if (useMenu) {
+                    ActionsMenu(actions)
+                } else {
+                    Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        actions.forEach { action ->
+                            AppActionButton(action.label, action.icon, action.onClick)
+                        }
                     }
                 }
             }
@@ -155,6 +158,7 @@ fun AppContent() {
                         }
                     }
                 }
+            }
             }
         }
         if (showExportPopup) {
@@ -313,6 +317,30 @@ fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
     getMetadataFromFile(filePath, metadata, onChange)
 }
 
+fun selectAudioFile(): String? {
+    val frames = Frame.getFrames()
+    val parent = frames.firstOrNull { it.isShowing }
+    val audioExtensions = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")
+    val dialog = FileDialog(parent, "Select an audio file", FileDialog.LOAD).apply {
+        setFilenameFilter { _, name ->
+            name.substringAfterLast('.', "").lowercase() in audioExtensions
+        }
+    }
+
+    val focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow
+    val bounds = focused?.graphicsConfiguration?.bounds
+    if (bounds != null) {
+        dialog.setBounds((bounds.width / 2) - 300, (bounds.height / 2) - 200, 600, 400)
+    }
+
+
+
+    dialog.isVisible = true
+
+    val filePath = dialog.file ?: return null
+    return File(dialog.directory, filePath).absolutePath
+}
+
 fun getMetadataFromFile(filePath: String, metadata: Metadata, onChange: (Metadata) -> Unit) {
     val file = File(filePath).absoluteFile.parentFile ?: File(".")
     val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
@@ -422,4 +450,45 @@ fun List<String>.runCommand(workingDir: File) {
         .redirectError(ProcessBuilder.Redirect.INHERIT)
         .start()
         .waitFor(60, TimeUnit.MINUTES)
+}
+
+class AppAction(
+    val label: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit
+)
+
+@Composable
+fun AppActionButton(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Button(onClick = onClick) {
+        Icon(icon, contentDescription = label)
+        Spacer(Modifier.width(8.dp))
+        Text(label)
+    }
+}
+
+@Composable
+fun ActionsMenu(actions: List<AppAction>) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "Actions")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            actions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.label) },
+                    leadingIcon = { Icon(action.icon, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        action.onClick()
+                    }
+                )
+            }
+        }
+    }
 }
