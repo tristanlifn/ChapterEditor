@@ -5,15 +5,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowColumn
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.Divider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -74,7 +77,7 @@ fun AppContent() {
     var metadata = remember { mutableStateOf(
         Metadata(
             mutableStateListOf(), timeBase = "1/1000",
-            date = "", title = "", artist = "", album = "", albumArtist = "", comment = ""
+            date = "", title = "", artist = "", album = "", albumArtist = "", comment = "", composer = ""
         )
     ) }
     var nextId by remember { mutableIntStateOf(0) }
@@ -119,7 +122,7 @@ fun AppContent() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Models.Chapter Editor", style = MaterialTheme.typography.headlineMedium)
+                Text("Chapter Editor", style = MaterialTheme.typography.headlineMedium)
                 if (useMenu) {
                     ActionsMenu(actions)
                 } else {
@@ -136,6 +139,8 @@ fun AppContent() {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 FileMetadata(metadata, onChange = { metadata.value = it })
+
+                Divider(color = MaterialTheme.colorScheme.secondary, thickness = 2.dp)
 
                 if (metadata.value.chapters.isEmpty()) {
                     BlankSlate()
@@ -166,7 +171,7 @@ fun AppContent() {
                 metadata = mutableStateOf(
                     Metadata(
                         mutableStateListOf(), timeBase = "1/1000",
-                        date = "", title = "", artist = "", album = "", albumArtist = "", comment = ""
+                        date = "", title = "", artist = "", album = "", albumArtist = "", comment = "", composer = ""
                     )
                 )
             })
@@ -174,13 +179,13 @@ fun AppContent() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
 
-    Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column {
+    FlowRow (modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        FlowColumn {
             OutlinedTextField(
                 value = metadata.value.title,
                 onValueChange = { onChange(metadata.value.copy(title = it)) },
@@ -194,11 +199,11 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 singleLine = true
             )
         }
-        Column {
+        FlowColumn {
             OutlinedTextField(
                 value = metadata.value.artist,
                 onValueChange = { onChange(metadata.value.copy(artist = it)) },
-                label = { Text("Artist") },
+                label = { Text("Author") },
                 singleLine = true
             )
             ExposedDropdownMenuBox(
@@ -234,7 +239,7 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 }
             }
         }
-        Column {
+        FlowColumn {
             OutlinedTextField(
                 value = metadata.value.album,
                 onValueChange = { onChange(metadata.value.copy(album = it)) },
@@ -248,11 +253,17 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 singleLine = true
             )
         }
-        Column {
+        FlowColumn {
             OutlinedTextField(
                 value = metadata.value.comment,
                 onValueChange = { onChange(metadata.value.copy(comment = it)) },
                 label = { Text("Comment") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = metadata.value.composer,
+                onValueChange = { onChange(metadata.value.copy(composer = it)) },
+                label = { Text("Narrator") },
                 singleLine = true
             )
         }
@@ -333,8 +344,6 @@ fun selectAudioFile(): String? {
         dialog.setBounds((bounds.width / 2) - 300, (bounds.height / 2) - 200, 600, 400)
     }
 
-
-
     dialog.isVisible = true
 
     val filePath = dialog.file ?: return null
@@ -396,6 +405,7 @@ fun mapMetadataFile(file: File, metadata: Metadata, onChange: (Metadata) -> Unit
                     "album" -> result = result.copy(album = trimmed.substringAfter('='))
                     "album_artist" -> result = result.copy(albumArtist = trimmed.substringAfter('='))
                     "comment" -> result = result.copy(comment = trimmed.substringAfter('='))
+                    "composer" -> result = result.copy(composer = trimmed.substringAfter('='))
                 }
             }
         }
@@ -421,6 +431,8 @@ fun buildMetadataContent(metadata: Metadata): String {
         content += "album_artist=${metadata.albumArtist}\n"
     if (metadata.comment.isNotBlank())
         content += "comment=${metadata.comment}\n"
+    if (metadata.composer.isNotBlank())
+        content += "composer=${metadata.composer}\n"
 
     for (chapter in metadata.chapters){
         val chapterString =

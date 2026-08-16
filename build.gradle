@@ -29,17 +29,180 @@ compose.desktop {
     application {
         mainClass = "MainKt"
 
+        buildTypes {
+            release {
+                proguard {
+                    isEnabled().set(false)
+                }
+            }
+        }
+
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
-            packageName = "compose-desktop-app"
-            packageVersion = "1.0.0"
+            targetFormats(TargetFormat.Deb, TargetFormat.Rpm, TargetFormat.AppImage)
+            packageName = "chapter-editor"
+            packageVersion = project.version as String
             description = "A native-feeling Compose Multiplatform desktop app for Linux"
             vendor = "Your Name"
 
             linux {
-                iconFile.set(project.file("icon.png"))
+                iconFile.set(project.file("Logo-128x128.png"))
                 menuGroup = "Utility"
             }
         }
+    }
+}
+
+def appName = "chapter-editor"
+def desktopFile = file("packaging/${appName}.desktop")
+def iconFile = file("Logo-128x128.png")
+
+tasks.register("createDesktopFile") {
+    description = "Creates packaging/chapter-editor.desktop if it does not exist (edit it once, then commit it)"
+    group = "distribution"
+    outputs.file(desktopFile)
+    doLast {
+        if (!desktopFile.exists()) {
+            desktopFile.parentFile.mkdirs()
+            desktopFile.text = """[Desktop Entry]
+Type=Application
+Name=Chapter Editor
+Comment=Edit chapter metadata of audio books
+Exec=${appName}
+Icon=${appName}
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupWMClass=${appName}
+"""
+        }
+    }
+}
+
+tasks.register("packageCustomAppImage") {
+    description = "Compiles a release build and packages it into an AppImage using your .desktop file"
+    group = "distribution"
+    dependsOn("createDistributable")
+
+    def appImageDir = layout.buildDirectory.dir("appimage").get().asFile
+    def appDir = file("${appImageDir}/AppDir")
+    def tool = file("${appImageDir}/appimagetool-x86_64.AppImage")
+
+    doLast {
+        def distrib = layout.buildDirectory.dir("compose/binaries/main/app/${appName}").get().asFile
+        if (!distrib.exists()) {
+            throw new GradleException("Expected jpackage output at ${distrib}; run createDistributable first")
+        }
+        if (!desktopFile.exists()) {
+            throw new GradleException("Missing ${desktopFile}; run ./gradlew createDesktopFile first")
+        }
+
+        project.delete(appDir)
+        def appTarget = file("${appDir}/${appName}")
+        project.copy {
+            from distrib
+            into appTarget
+        }
+        project.copy { from desktopFile; into appDir }
+        project.copy { from iconFile; into appDir; rename { "${appName}.png" } }
+
+        def appRun = file("${appDir}/AppRun")
+        appRun.text = """#!/bin/sh
+SELF="\$(readlink -f "\$0")"
+HERE="\${SELF%/*}"
+export PATH="\$HERE/usr/bin:\$PATH"
+exec "\$HERE/${appName}/bin/${appName}" "\$@"
+"""
+        appRun.setExecutable(true)
+
+        def ffmpegBin = file("${appDir}/usr/bin/ffmpeg")
+        if (!ffmpegBin.exists()) {
+            def ffmpegTarball = file("${appImageDir}/ffmpeg-static.tar.xz")
+            if (!ffmpegTarball.exists()) {
+                println("Downloading static ffmpeg...")
+                def dl = new ProcessBuilder("wget", "-q", "-O", ffmpegTarball.absolutePath,
+                    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz")
+                dl.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                dl.redirectError(ProcessBuilder.Redirect.INHERIT)
+                if (dl.start().waitFor() != 0) {
+                    throw new GradleException("Failed to download static ffmpeg")
+                }
+            }
+            ffmpegBin.parentFile.mkdirs()
+            def tarProc = new ProcessBuilder("tar", "-xf", ffmpegTarball.absolutePath,
+                "-C", ffmpegBin.parentFile.absolutePath, "--strip-components=2",
+                "ffmpeg-master-latest-linux64-gpl/bin/ffmpeg")
+            tarProc.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            tarProc.redirectError(ProcessBuilder.Redirect.INHERIT)
+            if (tarProc.start().waitFor() != 0) {
+                throw new GradleException("Failed to extract ffmpeg from ${ffmpegTarball}")
+            }
+        }
+
+        if (!tool.exists()) {
+            println("Downloading appimagetool...")
+            appImageDir.mkdirs()
+            def dl = new ProcessBuilder("wget", "-q", "-O", tool.absolutePath,
+                "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage")
+            dl.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            dl.redirectError(ProcessBuilder.Redirect.INHERIT)
+            if (dl.start().waitFor() != 0) {
+                throw new GradleException("Failed to download appimagetool")
+            }
+        }
+        tool.setExecutable(true)
+
+        def out = file("${appImageDir}/${appName}-${project.version}-x86_64.AppImage")
+        def toolProc = new ProcessBuilder(tool.absolutePath, "--appimage-extract-and-run", appDir.absolutePath, out.absolutePath)
+        toolProc.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+        toolProc.redirectError(ProcessBuilder.Redirect.INHERIT)
+        if (toolProc.start().waitFor() != 0) {
+            throw new GradleException("appimagetool failed")
+        }
+        println("AppImage created at ${out}")
+    }
+}
+
+tasks.register("installDesktopEntry") {
+    description = "Packages an AppImage and installs a .desktop launcher into ~/.local/share/applications that runs it"
+    group = "distribution"
+    dependsOn("packageCustomAppImage")
+
+    def appImageDir = layout.buildDirectory.dir("appimage").get().asFile
+    def appImage = file("${appImageDir}/${appName}-${project.version}-x86_64.AppImage")
+    def home = System.getProperty("user.home") ?: System.getenv("HOME")
+    def appsDir = file("${home}/.local/share/applications")
+    def iconsDir = file("${home}/.local/share/icons/hicolor/128x128/apps")
+
+    outputs.upToDateWhen { false }
+
+    doLast {
+        if (!appImage.exists()) {
+            throw new GradleException("AppImage not found at ${appImage}; run packageCustomAppImage first")
+        }
+        if (home == null) {
+            throw new GradleException("Cannot resolve home directory to install the desktop entry")
+        }
+
+        appsDir.mkdirs()
+        iconsDir.mkdirs()
+
+        project.copy {
+            from iconFile
+            into iconsDir
+            rename { "${appName}.png" }
+        }
+
+        def launcher = file("${appsDir}/${appName}.desktop")
+        launcher.text = """[Desktop Entry]
+Type=Application
+Name=Chapter Editor
+Comment=Edit chapter metadata of audio books
+Exec=${appImage.absolutePath} --appimage-extract-and-run
+Icon=${appName}
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupWMClass=${appName}
+"""
+        println("Installed launcher at ${launcher}")
+        println("It launches ${appImage.absolutePath}")
     }
 }

@@ -9,4 +9,5 @@ data class Metadata(
     val albumArtist: String,
     val album: String,
     val comment: String,
+    val composer: String,
 )
