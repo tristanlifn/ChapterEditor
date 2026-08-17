@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.Divider
@@ -190,13 +191,17 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 value = metadata.value.title,
                 onValueChange = { onChange(metadata.value.copy(title = it)) },
                 label = { Text("Title") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
             OutlinedTextField(
                 value = metadata.value.date,
                 onValueChange = { onChange(metadata.value.copy(date = it)) },
                 label = { Text("Date") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
         }
         FlowColumn {
@@ -204,7 +209,9 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 value = metadata.value.artist,
                 onValueChange = { onChange(metadata.value.copy(artist = it)) },
                 label = { Text("Author") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
             ExposedDropdownMenuBox(
                 expanded = expanded,
@@ -216,7 +223,10 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                     readOnly = true,
                     label = { Text("Time base") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .widthIn(min = 280.dp, max = 280.dp)
+                        .padding(2.dp, 0.dp)
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
@@ -244,13 +254,17 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 value = metadata.value.album,
                 onValueChange = { onChange(metadata.value.copy(album = it)) },
                 label = { Text("Series") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
             OutlinedTextField(
                 value = metadata.value.albumArtist,
                 onValueChange = { onChange(metadata.value.copy(albumArtist = it)) },
                 label = { Text("Series artist") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
         }
         FlowColumn {
@@ -258,13 +272,17 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                 value = metadata.value.comment,
                 onValueChange = { onChange(metadata.value.copy(comment = it)) },
                 label = { Text("Comment") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
             OutlinedTextField(
                 value = metadata.value.composer,
                 onValueChange = { onChange(metadata.value.copy(composer = it)) },
                 label = { Text("Narrator") },
-                singleLine = true
+                singleLine = true,
+                modifier = Modifier.widthIn(min = 280.dp, max = 280.dp)
+                    .padding(2.dp, 0.dp)
             )
         }
     }
@@ -324,17 +342,16 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
 }
 
 fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
-    val filePath = selectAudioFile() ?: return
+    val filePath = selectFile() ?: return
     getMetadataFromFile(filePath, metadata, onChange)
 }
 
-fun selectAudioFile(): String? {
+fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")): String? {
     val frames = Frame.getFrames()
     val parent = frames.firstOrNull { it.isShowing }
-    val audioExtensions = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")
-    val dialog = FileDialog(parent, "Select an audio file", FileDialog.LOAD).apply {
+    val dialog = FileDialog(parent, "Select a file", FileDialog.LOAD).apply {
         setFilenameFilter { _, name ->
-            name.substringAfterLast('.', "").lowercase() in audioExtensions
+            name.substringAfterLast('.', "").lowercase() in formats
         }
     }
 
