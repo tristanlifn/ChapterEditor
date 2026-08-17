@@ -91,7 +91,7 @@ fun AppContent() {
         AppAction("Export metadata to audio file", Icons.Filled.FileUpload) {
             showExportPopup = true
         },
-        AppAction("Build metadata file", Icons.Filled.FileDownload) {
+        AppAction("Export metadata to txt file", Icons.Filled.FileDownload) {
             buildMetadataFile(metadata)
         },
         AppAction("Add chapter", Icons.Default.Add) {
@@ -104,7 +104,7 @@ fun AppContent() {
                 last + 1
 
             val chapter =
-                Chapter(id = nextId, title = "Models.Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
+                Chapter(id = nextId, title = "Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
             metadata.value.chapters.add(chapter)
             nextId += 1
         }
