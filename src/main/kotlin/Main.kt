@@ -346,7 +346,7 @@ fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
     getMetadataFromFile(filePath, metadata, onChange)
 }
 
-fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma")): String? {
+fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma", "txt")): String? {
     val frames = Frame.getFrames()
     val parent = frames.firstOrNull { it.isShowing }
     val dialog = FileDialog(parent, "Select a file", FileDialog.LOAD).apply {
@@ -368,6 +368,11 @@ fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", 
 }
 
 fun getMetadataFromFile(filePath: String, metadata: Metadata, onChange: (Metadata) -> Unit) {
+    if (File(filePath).extension.equals("txt", ignoreCase = true)) {
+        mapMetadataFile(File(filePath), metadata, onChange)
+        return
+    }
+
     val file = File(filePath).absoluteFile.parentFile ?: File(".")
     val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
     val metadataFilePath = "$tmpDir/metadata.txt"

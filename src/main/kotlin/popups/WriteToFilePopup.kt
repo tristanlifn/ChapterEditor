@@ -172,18 +172,37 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                                 val hasCover = coverImage.isNotBlank()
                                 val command = mutableListOf(
                                     "ffmpeg", "-i", inputFile.absolutePath,
-                                    "-i", metadataFilePath
+                                    "-f", "ffmetadata", "-i", metadataFilePath
                                 )
                                 if (hasCover) {
                                     command.add("-i")
                                     command.add(coverImage)
                                 }
+                                command.add("-map")
+                                command.add("0:a")
+                                if (hasCover) {
+                                    command.add("-map")
+                                    command.add("2:v")
+                                }
                                 command.add("-map_metadata")
-                                command.add(if (hasCover) "2" else "1")
-                                command.add("-codec:a")
-                                command.add("aac")
-                                command.add("-b:a")
-                                command.add("64k")
+                                command.add("1")
+                                command.add("-map_chapters")
+                                command.add("1")
+                                if (probeAudioCodec(inputFile) == "aac") {
+                                    command.add("-c:a")
+                                    command.add("copy")
+                                } else {
+                                    command.add("-codec:a")
+                                    command.add("aac")
+                                    command.add("-b:a")
+                                    command.add("64k")
+                                }
+                                if (hasCover) {
+                                    command.add("-c:v")
+                                    command.add("mjpeg")
+                                    command.add("-disposition:v")
+                                    command.add("attached_pic")
+                                }
                                 command.add("-f")
                                 command.add("mp4")
                                 command.add("-progress")
@@ -264,5 +283,20 @@ fun runFfmpegWithProgress(
         onUpdate(0, "", false, errorOutput.toString().trim())
     } else {
         onUpdate(0, "", true, "")
+    }
+}
+
+fun probeAudioCodec(file: File): String? {
+    return try {
+        val process = ProcessBuilder(
+            "ffprobe", "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "csv=p=0",
+            file.absolutePath
+        ).start()
+        process.inputStream.bufferedReader().readText().trim().ifBlank { null }
+    } catch (e: Exception) {
+        null
     }
 }
