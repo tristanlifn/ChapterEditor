@@ -320,7 +320,7 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
                 OutlinedTextField(
                     value = box.startTime.toString(),
                     onValueChange = { input ->
-                        input.toIntOrNull()?.let { onChange(box.copy(startTime = it)) }
+                        input.toLongOrNull()?.let { onChange(box.copy(startTime = it)) }
                     },
                     label = { Text("Start timestamp") },
                     singleLine = true
@@ -328,7 +328,7 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
                 OutlinedTextField(
                     value = box.endTime.toString(),
                     onValueChange = { input ->
-                        input.toIntOrNull()?.let { onChange(box.copy(endTime = it)) }
+                        input.toLongOrNull()?.let { onChange(box.copy(endTime = it)) }
                     },
                     label = { Text("End timestamp") },
                     singleLine = true
@@ -405,12 +405,12 @@ fun mapMetadataFile(file: File, metadata: Metadata, onChange: (Metadata) -> Unit
                     "START" -> {
                         val chapter = chapters.last()
                         chapters[chapters.lastIndex] =
-                            chapter.copy(startTime = trimmed.substringAfter('=').toIntOrNull() ?: chapter.startTime)
+                            chapter.copy(startTime = trimmed.substringAfter('=').toLongOrNull() ?: chapter.startTime)
                     }
                     "END" -> {
                         val chapter = chapters.last()
                         chapters[chapters.lastIndex] =
-                            chapter.copy(endTime = trimmed.substringAfter('=').toIntOrNull() ?: chapter.endTime)
+                            chapter.copy(endTime = trimmed.substringAfter('=').toLongOrNull() ?: chapter.endTime)
                     }
                     "title" -> {
                         val chapter = chapters.last()
