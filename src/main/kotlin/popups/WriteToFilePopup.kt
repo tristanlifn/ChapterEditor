@@ -26,9 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import buildMetadataContent
+import helpers.probeAudioCodec
+import helpers.selectFile
 import models.Metadata
 import java.io.File
-import selectFile
 
 class FfmpegProgress {
     var writing by mutableStateOf(false)
@@ -120,7 +121,7 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
-                        Button(onClick = { inputFilePath = selectFile() ?: inputFilePath }) {
+                        Button(onClick = { inputFilePath = selectFile().firstOrNull() ?: inputFilePath }) {
                             Text("Select")
                         }
                     }
@@ -137,7 +138,7 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
-                        Button(onClick = { coverImage = selectFile(coverExtensions) ?: coverImage}) {
+                        Button(onClick = { coverImage = selectFile(coverExtensions).firstOrNull() ?: coverImage}) {
                             Text("Select")
                         }
                     }
@@ -283,20 +284,5 @@ fun runFfmpegWithProgress(
         onUpdate(0, "", false, errorOutput.toString().trim())
     } else {
         onUpdate(0, "", true, "")
-    }
-}
-
-fun probeAudioCodec(file: File): String? {
-    return try {
-        val process = ProcessBuilder(
-            "ffprobe", "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name",
-            "-of", "csv=p=0",
-            file.absolutePath
-        ).start()
-        process.inputStream.bufferedReader().readText().trim().ifBlank { null }
-    } catch (e: Exception) {
-        null
     }
 }

@@ -10,4 +10,5 @@ data class Metadata(
     val album: String,
     val comment: String,
     val composer: String,
+    val sources: MutableList<AudioSource> = mutableListOf(),
 )

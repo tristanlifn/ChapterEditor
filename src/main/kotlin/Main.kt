@@ -1,5 +1,6 @@
 import models.Chapter
 import models.Metadata
+import helpers.probeFileLength
 import popups.writeMetadataToFile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
@@ -43,7 +45,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,33 +56,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import java.awt.FileDialog
+import helpers.getMetadataOrFileName
+import helpers.selectFile
+import models.AudioSource
 import java.awt.Frame
 import java.io.File
+import java.lang.String.format
 import java.util.concurrent.TimeUnit
-import java.awt.KeyboardFocusManager
+import javax.swing.JFileChooser
+import javax.swing.filechooser.FileNameExtensionFilter
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
 
-fun main() = application {
-    Window(
-        onCloseRequest = ::exitApplication,
-        title = "Models.Chapter Editor",
-        state = rememberWindowState()
-    ) {
-        MaterialTheme(colorScheme = darkColorScheme()) {
-            AppContent()
+
+fun main() {
+    application {
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = "Models.Chapter Editor",
+            state = rememberWindowState()
+        ) {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                AppContent()
+            }
         }
-    }
+    } 
 }
 
 @Composable
 fun AppContent() {
-    var metadata = remember { mutableStateOf(
+    val metadata = remember { mutableStateOf(
         Metadata(
             mutableStateListOf(), timeBase = "1/1000",
-            date = "", title = "", artist = "", album = "", albumArtist = "", comment = "", composer = ""
+            date = "", title = "", artist = "", album = "", 
+            albumArtist = "", comment = "", composer = "", sources = mutableStateListOf(), 
         )
     ) }
-    var nextId by remember { mutableIntStateOf(0) }
+    
     var showExportPopup by remember { mutableStateOf(false) }
 
     val actions = listOf(
@@ -94,21 +106,23 @@ fun AppContent() {
         AppAction("Export metadata to txt file", Icons.Filled.FileDownload) {
             buildMetadataFile(metadata)
         },
-        AppAction("Add chapter", Icons.Default.Add) {
-            val startTime = metadata.value.chapters.lastOrNull()?.endTime ?: 0
-            val last: Int? = metadata.value.chapters.lastOrNull()?.id
-
-            nextId = if (last == null)
-                0
-            else
-                last + 1
-
-            val chapter =
-                Chapter(id = nextId, title = "Chapter ${nextId + 1}", startTime = startTime, endTime = 0)
-            metadata.value.chapters.add(chapter)
-            nextId += 1
-        }
     )
+    
+    fun addSource() {
+        val filesPaths = selectFile(setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma"))
+        if (filesPaths.isEmpty()) return
+        
+        for (filePath in filesPaths) {
+            val file = File(filePath)
+            val durationMs = probeFileLength(file) ?: continue
+    
+            val nextId: Int = metadata.value.chapters.maxOfOrNull { it.id }?.plus(1) ?: 0
+            val sourceId = metadata.value.sources.maxOfOrNull { it.id }?.plus(1) ?: 0
+    
+            metadata.value.sources.add(AudioSource(id = sourceId, path = file.path, durationMs = durationMs))
+            metadata.value.chapters.add(Chapter(id = nextId, title = file.nameWithoutExtension, startTime = 0, endTime = convertMsToTimebase(durationMs, metadata.value.timeBase), sourceId = sourceId))
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         BoxWithConstraints {
@@ -117,63 +131,84 @@ fun AppContent() {
             Column(
                 modifier = Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Chapter Editor", style = MaterialTheme.typography.headlineMedium)
-                if (useMenu) {
-                    ActionsMenu(actions)
-                } else {
-                    Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        actions.forEach { action ->
-                            AppActionButton(action.label, action.icon, action.onClick)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Chapter Editor", style = MaterialTheme.typography.headlineMedium)
+                    if (useMenu) {
+                        ActionsMenu(actions)
+                    } else {
+                        Row (horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            actions.forEach { action ->
+                                AppActionButton(action.label, action.icon, action.onClick)
+                            }
                         }
                     }
                 }
-            }
 
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                FileMetadata(metadata, onChange = { metadata.value = it })
-
-                Divider(color = MaterialTheme.colorScheme.secondary, thickness = 2.dp)
-
-                if (metadata.value.chapters.isEmpty()) {
-                    BlankSlate()
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(metadata.value.chapters.toList(), key = { it.id }) { box ->
-                            ChapterCard(
-                                box = box,
-                                onChange = { updated ->
-                                    val index = metadata.value.chapters.indexOfFirst { it.id == box.id }
-                                    if (index >= 0) metadata.value.chapters[index] = updated
-                                },
-                                onDelete = {
-                                    metadata.value.chapters.removeAll { it.id == box.id }
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    FileMetadata(metadata, onChange = { metadata.value = it })
+    
+                    Divider(color = MaterialTheme.colorScheme.secondary, thickness = 2.dp)
+    
+                    if (metadata.value.chapters.isEmpty()) {
+                        BlankSlate(onSourceAdd = { addSource() })
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(metadata.value.sources.toList(), key = { it.id }) { source ->
+                                AudioSourceCard(
+                                    source = source,
+                                    chapter = metadata.value.chapters.filter { it.sourceId == source.id },
+                                    timebase = metadata.value.timeBase,
+                                    onChapterAdd = {
+                                        val startTime = metadata.value.chapters.filter { it.sourceId == source.id }.maxOfOrNull { it.endTime } ?: 0
+                                        val nextId: Int = metadata.value.chapters.maxOfOrNull { it.id }?.plus(1) ?: 0
+    
+                                        val chapter = Chapter(id = nextId, title = "Chapter ${nextId + 1}", startTime = startTime, endTime = 0, sourceId = source.id)
+                                        metadata.value.chapters.add(chapter)
+                                    },
+                                    onChapterChange = { chapter ->
+                                        val chapterIndex = metadata.value.chapters.indexOf(chapter)
+                                        metadata.value.chapters[chapterIndex] = metadata.value.chapters[chapterIndex].copy(title = chapter.title, startTime = chapter.startTime, endTime = chapter.endTime)
+                                    },
+                                    onChapterDelete = { chapter ->
+                                        metadata.value.chapters.remove(chapter)
+                                    },
+                                    onDelete = { 
+                                        metadata.value.chapters.removeAll { it.sourceId == source.id }
+                                        metadata.value.sources.remove(source)
+                                    },
+                                )
+                            }
+                            
+                            item { 
+                                Button(
+                                    onClick = { addSource() } 
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Add audio file")
+                                    Text("Add audio file")
                                 }
-                            )
+                            }
                         }
                     }
                 }
-            }
             }
         }
         if (showExportPopup) {
             writeMetadataToFile(metadata = metadata, onDismiss = { showExportPopup = false }, onResetState = {
-                metadata = mutableStateOf(
-                    Metadata(
-                        mutableStateListOf(), timeBase = "1/1000",
-                        date = "", title = "", artist = "", album = "", albumArtist = "", comment = "", composer = ""
-                    )
+                metadata.value = Metadata(
+                    mutableStateListOf(), timeBase = "1/1000",
+                    date = "", title = "", artist = "", album = "", 
+                    albumArtist = "", comment = "", composer = "", sources = mutableStateListOf(),
                 )
             })
         }
@@ -289,15 +324,81 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
 }
 
 @Composable
-fun BlankSlate() {
+fun BlankSlate(onSourceAdd: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("No boxes yet", style = MaterialTheme.typography.titleLarge)
+            Text("No chapters yet", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Click \"Add box\" to create your first one",
+                "Click \"Add audio file\" to add your first one",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            
+            Button(
+                onClick = onSourceAdd,
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add audio file")
+                Spacer(Modifier.width(8.dp))
+                Text("Add audio file")
+            }
+        }
+    }
+}
+
+@Composable
+fun AudioSourceCard(
+    source: AudioSource,
+    chapter: List<Chapter>,
+    timebase: String,
+    onChapterAdd: () -> Unit,
+    onChapterChange: (Chapter) -> Unit,
+    onChapterDelete: (Chapter) -> Unit,
+    onDelete: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row (
+                Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column (
+                    horizontalAlignment = Alignment.Start,
+                ) { 
+                    Text(getMetadataOrFileName(File(source.path)))
+                }
+                Column (
+                    horizontalAlignment = Alignment.End,
+                ) { 
+                    val length = source.durationMs.milliseconds
+                    print(source.durationMs)
+                    
+                    Text(length.toComponents { hours, minutes, seconds, _ ->
+                        format("%02d:%02d:%02d", hours, minutes, seconds) })
+
+                }
+            }
+            chapter.forEach { chapter ->
+                ChapterCard(
+                    box = chapter, 
+                    onChange = onChapterChange,
+                    onDelete = { onChapterDelete(chapter) }
+                )
+            }
+            Row {
+                Column { 
+                    IconButton(onClick = onChapterAdd) {
+                        Icon(Icons.Default.Add, contentDescription = "Add chapter")
+                    }
+                }
+                Column { 
+                    IconButton(
+                        onClick = onDelete,
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete source file and chapters")
+                    }
+                }
+            }
         }
     }
 }
@@ -342,44 +443,24 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
 }
 
 fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
-    val filePath = selectFile() ?: return
-    getMetadataFromFile(filePath, metadata, onChange)
+    val filePaths = selectFile()
+    getMetadataFromFile(filePaths, metadata, onChange)
 }
 
-fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma", "txt")): String? {
-    val frames = Frame.getFrames()
-    val parent = frames.firstOrNull { it.isShowing }
-    val dialog = FileDialog(parent, "Select a file", FileDialog.LOAD).apply {
-        setFilenameFilter { _, name ->
-            name.substringAfterLast('.', "").lowercase() in formats
+fun getMetadataFromFile(filePaths: List<String>, metadata: Metadata, onChange: (Metadata) -> Unit) {
+    for (filePath in filePaths) {
+        if (File(filePath).extension.equals("txt", ignoreCase = true)) {
+            mapMetadataFile(File(filePath), metadata, onChange)
+            continue
         }
+        
+        val file = File(filePath).absoluteFile.parentFile ?: File(".")
+        val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
+        val metadataFilePath = "$tmpDir/metadata.txt"
+        
+        listOf("ffmpeg", "-i", filePath, "-f", "ffmetadata", metadataFilePath).runCommand(file)
+        mapMetadataFile(File(metadataFilePath), metadata, onChange)
     }
-
-    val focused = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow
-    val bounds = focused?.graphicsConfiguration?.bounds
-    if (bounds != null) {
-        dialog.setBounds((bounds.width / 2) - 300, (bounds.height / 2) - 200, 600, 400)
-    }
-
-    dialog.isVisible = true
-
-    val filePath = dialog.file ?: return null
-    return File(dialog.directory, filePath).absolutePath
-}
-
-fun getMetadataFromFile(filePath: String, metadata: Metadata, onChange: (Metadata) -> Unit) {
-    if (File(filePath).extension.equals("txt", ignoreCase = true)) {
-        mapMetadataFile(File(filePath), metadata, onChange)
-        return
-    }
-
-    val file = File(filePath).absoluteFile.parentFile ?: File(".")
-    val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
-    val metadataFilePath = "$tmpDir/metadata.txt"
-
-    listOf("ffmpeg", "-i", filePath, "-f", "ffmetadata", metadataFilePath).runCommand(file)
-
-    mapMetadataFile(File(metadataFilePath), metadata, onChange)
 }
 
 fun mapMetadataFile(file: File, metadata: Metadata, onChange: (Metadata) -> Unit) {
@@ -456,7 +537,7 @@ fun buildMetadataContent(metadata: Metadata): String {
     if (metadata.composer.isNotBlank())
         content += "composer=${metadata.composer}\n"
 
-    for (chapter in metadata.chapters){
+    for (chapter in resolveChapterTimestamp(metadata)){
         val chapterString =
                     "[CHAPTER]\n" +
                     "TIMEBASE=${metadata.timeBase}\n" +
@@ -525,4 +606,29 @@ fun ActionsMenu(actions: List<AppAction>) {
             }
         }
     }
+}
+
+
+
+fun convertMsToTimebase(length: Long, timebase: String): Long = when (timebase) {
+    "1/1000" -> length
+    "1/100" -> length / 10
+    else -> error("Invalid time base: $timebase")
+}
+
+fun resolveChapterTimestamp(metadata: Metadata): List<Chapter> {
+    val offsets = mutableMapOf<Int, Long>()
+    var runningMs = 0L
+    
+    for (source in metadata.sources) {
+        val timespanInTimebase = convertMsToTimebase(runningMs, metadata.timeBase)
+        
+        offsets[source.id] = timespanInTimebase
+        runningMs += source.durationMs
+    }
+    
+    return metadata.chapters.map { chapter ->
+        val offset = chapter.sourceId?.let { offsets[it] } ?: 0
+        chapter.copy(startTime = chapter.startTime + offset, endTime = chapter.endTime + offset)
+    }.sortedBy { it.startTime }
 }
