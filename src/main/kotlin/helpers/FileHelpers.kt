@@ -1,12 +1,18 @@
 package helpers
 
-import androidx.compose.ui.text.toLowerCase
-import java.awt.Frame
+import io.github.vinceglb.filekit.FileKit
+import io.github.vinceglb.filekit.dialogs.FileKitMode
+import io.github.vinceglb.filekit.dialogs.FileKitType
+import io.github.vinceglb.filekit.dialogs.openDirectoryPicker
+import io.github.vinceglb.filekit.dialogs.openFilePicker
+import io.github.vinceglb.filekit.nameWithoutExtension
+import io.github.vinceglb.filekit.path
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Locale
-import java.util.Locale.getDefault
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.math.roundToLong
 
 
@@ -54,19 +60,21 @@ fun getMetadataOrFileName(file: File): String {
     }
 }
 
-fun selectFile(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma", "txt"), desc: String = "Audio or metadata files"): List<String> {
-    val frames = Frame.getFrames()
-    val parent = frames.firstOrNull { it.isShowing }
+private val pickerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val fileChooser = JFileChooser()
-    fileChooser.dialogTitle = "Select a file"
-    fileChooser.isMultiSelectionEnabled = true
-    fileChooser.fileSelectionMode = JFileChooser.FILES_ONLY
-    fileChooser.fileFilter = FileNameExtensionFilter(desc, *formats.toTypedArray())
+fun pickFilesAsync(formats: Set<String> = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma", "txt"), desc: String = "Audio or metadata files", multiple: Boolean = true, onResult: (List<String>) -> Unit) {
+    pickerScope.launch { 
+        val files = FileKit.openFilePicker(
+            type = FileKitType.File(extensions = formats),
+            mode = if (multiple) FileKitMode.Multiple() else FileKitMode.Multiple(maxItems = 1),
+            title = desc,
+        )?.sortedWith(compareBy(naturalOrder) { it.nameWithoutExtension })?.map { it.path } ?: emptyList()
+        onResult(files)
+    }
+}
 
-    val result = fileChooser.showDialog(parent, "Select file")
-
-    return if (result == JFileChooser.APPROVE_OPTION) fileChooser.selectedFiles.sortedWith(compareBy(naturalOrder) {it.nameWithoutExtension}).map { it.path } else listOf<String>()
+fun pickDir(desc: String = "Select folder"): String? = runBlocking {
+    FileKit.openDirectoryPicker(title = desc)?.path
 }
 
 private val chunkRegex = Regex("\\d+|\\D+")
@@ -74,16 +82,18 @@ private val chunkRegex = Regex("\\d+|\\D+")
 val naturalOrder = Comparator<String> { a, b ->
     val aParts = chunkRegex.findAll(a.lowercase()).map { it.value }.toList()
     val bParts = chunkRegex.findAll(b.lowercase()).map { it.value }.toList()
-    
+
     for (i in 0 until minOf(aParts.size, bParts.size)) {
         val x = aParts[i]
         val y = bParts[i]
-        val cmp = if (x[0].isDigit() == y[i].isDigit())
+        val bothNumeric = x[0] in '0'..'9' && y[0] in '0'..'9'
+
+        val cmp = if (bothNumeric)
             x.toBigInteger().compareTo(y.toBigInteger())
         else
             x.compareTo(y)
         if (cmp != 0) return@Comparator cmp
     }
-    
+
     aParts.size - bParts.size
 }

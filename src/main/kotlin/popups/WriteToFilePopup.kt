@@ -1,5 +1,6 @@
 package popups
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,8 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -26,8 +31,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import buildMetadataContent
+import helpers.pickDir
+import helpers.pickFilesAsync
 import helpers.probeAudioCodec
-import helpers.selectFile
 import models.Metadata
 import java.io.File
 
@@ -47,7 +53,6 @@ class FfmpegProgress {
 
 @Composable
 fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit, onResetState: () -> Unit) {
-    var inputFilePath by remember { mutableStateOf("") }
     var coverImage by remember { mutableStateOf("") }
     var outputFileName by remember { mutableStateOf("") }
     var outputFilePath by remember { mutableStateOf("") }
@@ -91,7 +96,7 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                 } else if (progress.writing) {
                     Text("Writing metadata...", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(16.dp))
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    LinearProgressIndicator(modifier =  Modifier.fillMaxWidth(), progress = { ((progress.outTimeUs / 1000f) / metadata.value.sources.sumOf { it.durationMs }).coerceIn(0f, 1f) })
                     Spacer(Modifier.height(16.dp))
                     Text("Encoded: ${progress.elapsed}", style = MaterialTheme.typography.bodyLarge)
                     Text("Speed: ${progress.speed}", style = MaterialTheme.typography.bodySmall)
@@ -107,48 +112,49 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                         Text("Close")
                     }
                 } else {
+                    var isNameError by remember { mutableStateOf(false) }
+                    var errorMessage by remember { mutableStateOf("Invalid name") }
+                    
                     Text("Export metadata to audio file", style = MaterialTheme.typography.titleLarge)
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = inputFilePath,
-                            onValueChange = { inputFilePath = it },
-                            label = { Text("Audio file") },
-                            readOnly = true,
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Button(onClick = { inputFilePath = selectFile().firstOrNull() ?: inputFilePath }) {
-                            Text("Select")
-                        }
-                    }
-
+                    
                     Row (
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedTextField(
+                            modifier = Modifier.weight(1f),
                             value = coverImage,
                             onValueChange = { coverImage = it },
                             label = { Text("Cover image (optional)") },
                             readOnly = true,
                             singleLine = true,
-                            modifier = Modifier.weight(1f)
                         )
-                        Button(onClick = { coverImage = selectFile(coverExtensions).firstOrNull() ?: coverImage}) {
+                        Button(onClick = { pickFilesAsync(formats = coverExtensions, desc = "Choose cover image", onResult = { files -> files.firstOrNull()?.let { coverImage = it } }) }) {
                             Text("Select")
                         }
                     }
 
                     OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
                         value = outputFileName,
-                        onValueChange = { outputFileName = it },
+                        onValueChange = { outputFileName = it; isNameError = !isFileNameValid(it) },
                         label = { Text("Output file name") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        isError = isNameError,
+                        supportingText = {
+                            if (isNameError) {
+                                Text(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    text = errorMessage,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (isNameError) {
+                                Icon(Icons.Filled.Error, tint = MaterialTheme.colorScheme.error, contentDescription = errorMessage)
+                            }
+                        },
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -156,68 +162,45 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
                             Text("Cancel")
                         }
                         Button(
-                            enabled = inputFilePath.isNotBlank() && outputFileName.isNotBlank(),
+                            enabled = outputFileName.isNotBlank() && metadata.value.chapters.isNotEmpty() && !isNameError,
                             onClick = {
                                 // error messages and dont continue
-                                if (!isFileNameValid(outputFileName)) {
-                                    return@Button
-                                }
+//                                if (!isFileNameValid(outputFileName)) {
+//                                    isNameError = true
+//                                    return@Button
+//                                }
+                                
+                                val outputDir = pickDir(desc = "Select output directory") ?: return@Button
 
-                                val inputFile = File(inputFilePath).absoluteFile
-                                val outputFile = File(inputFile.parentFile ?: File("."), "$outputFileName.m4b")
-                                outputFilePath = outputFile.absolutePath
                                 val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditorExport")
+                                
+                                val outputFile = File(outputDir, "$outputFileName.m4b")
+                                outputFilePath = outputFile.absolutePath
+                                
                                 val metadataFilePath = "$tmpDir/metadata.txt"
                                 File(metadataFilePath).writeText(buildMetadataContent(metadata.value))
 
-                                val hasCover = coverImage.isNotBlank()
-                                val command = mutableListOf(
-                                    "ffmpeg", "-i", inputFile.absolutePath,
-                                    "-f", "ffmetadata", "-i", metadataFilePath
-                                )
-                                if (hasCover) {
-                                    command.add("-i")
-                                    command.add(coverImage)
+                                val listContent = metadata.value.sources.joinToString(separator = "\n") { source ->
+                                    "file '${source.path.replace("'", "'\\''")}'"
                                 }
-                                command.add("-map")
-                                command.add("0:a")
-                                if (hasCover) {
-                                    command.add("-map")
-                                    command.add("2:v")
-                                }
-                                command.add("-map_metadata")
-                                command.add("1")
-                                command.add("-map_chapters")
-                                command.add("1")
-                                if (probeAudioCodec(inputFile) == "aac") {
-                                    command.add("-c:a")
-                                    command.add("copy")
-                                } else {
-                                    command.add("-codec:a")
-                                    command.add("aac")
-                                    command.add("-b:a")
-                                    command.add("64k")
-                                }
-                                if (hasCover) {
-                                    command.add("-c:v")
-                                    command.add("mjpeg")
-                                    command.add("-disposition:v")
-                                    command.add("attached_pic")
-                                }
-                                command.add("-f")
-                                command.add("mp4")
-                                command.add("-progress")
-                                command.add("pipe:1")
-                                command.add("-nostats")
-                                command.add("-loglevel")
-                                command.add("error")
-                                command.add(outputFile.absolutePath)
-
+                                val listFile = File("$tmpDir/list.txt")
+                                listFile.writeText(listContent)
+                                
                                 progress.writing = true
                                 Thread {
+                                    val copy = metadata.value.sources.all { probeAudioCodec(File(it.path)) == "aac" }
+                                    
+                                    val command = buildExportCommand(
+                                        listFile = listFile.absolutePath,
+                                        metadataFile = metadataFilePath,
+                                        coverImage = coverImage,
+                                        copyAudio = copy,
+                                        outputFile = outputFilePath,
+                                    )
+                                    
                                     runFfmpegWithProgress(
                                         command = command,
-                                        workingDir = inputFile.parentFile ?: File("."),
+                                        workingDir = tmpDir.toFile(),
                                         onUpdate = { outTimeUs, speed, done, error ->
                                             if (outTimeUs > 0) progress.outTimeUs = outTimeUs
                                             if (speed.isNotBlank()) progress.speed = speed
@@ -238,6 +221,59 @@ fun writeMetadataToFile(metadata: MutableState<Metadata>, onDismiss: () -> Unit,
             }
         }
     )
+}
+
+fun buildExportCommand(
+    listFile: String,
+    metadataFile: String,
+    coverImage: String?,
+    copyAudio: Boolean,
+    outputFile: String,
+): List<String> {
+    val hasCover = !coverImage.isNullOrBlank()
+    val command = mutableListOf(
+        "ffmpeg", "-f", "concat", "-safe", "0", "-i", listFile,
+        "-f", "ffmetadata", "-i", metadataFile
+    )
+    if (hasCover) {
+        command.add("-i")
+        command.add(coverImage)
+    }
+    command.add("-map")
+    command.add("0:a")
+    if (hasCover) {
+        command.add("-map")
+        command.add("2:v")
+    }
+    command.add("-map_metadata")
+    command.add("1")
+    command.add("-map_chapters")
+    command.add("1")
+    if (copyAudio) {
+        command.add("-c:a")
+        command.add("copy")
+    } else {
+        command.add("-codec:a")
+        command.add("aac")
+        command.add("-b:a")
+        command.add("64k")
+    }
+    if (hasCover) {
+        command.add("-c:v")
+        command.add("mjpeg")
+        command.add("-disposition:v")
+        command.add("attached_pic")
+    }
+    command.add("-f")
+    command.add("mp4")
+    command.add("-progress")
+    command.add("pipe:1")
+    command.add("-nostats")
+    command.add("-loglevel")
+    command.add("error")
+    command.add(outputFile)
+
+    return command
 }
 
 fun isFileNameValid(path: String): Boolean {

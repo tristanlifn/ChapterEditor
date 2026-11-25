@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
@@ -33,11 +32,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -52,25 +51,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.toLowerCase
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import helpers.escapeFfmetadata
+import helpers.exportMetadataToFile
 import helpers.getMetadataOrFileName
-import helpers.selectFile
+import helpers.pickFilesAsync
+import helpers.unescapeFfmetadata
+
+import io.github.vinceglb.filekit.FileKit
 import models.AudioSource
-import java.awt.Frame
+import models.ParsedMetadata
+import models.RawChapter
 import java.io.File
 import java.lang.String.format
 import java.util.concurrent.TimeUnit
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.DurationUnit
-import kotlin.time.toDuration
 
 
 fun main() {
+    FileKit.init(appId = "org.dasvors.chapterEditor")
+    
     application {
         Window(
             onCloseRequest = ::exitApplication,
@@ -95,11 +99,11 @@ fun AppContent() {
     ) }
     
     var showExportPopup by remember { mutableStateOf(false) }
-
+    
     val actions = listOf(
-        AppAction("Import metadata", Icons.Filled.FileOpen) {
-            getMetadataFromFile(metadata.value) { metadata.value = it }
-        },
+//        AppAction("Import metadata", Icons.Filled.FileOpen) {
+//            getMetadataFromFile(metadata.value) { metadata.value = it }
+//        },
         AppAction("Export metadata to audio file", Icons.Filled.FileUpload) {
             showExportPopup = true
         },
@@ -109,19 +113,35 @@ fun AppContent() {
     )
     
     fun addSource() {
-        val filesPaths = selectFile(setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma"))
-        if (filesPaths.isEmpty()) return
-        
-        for (filePath in filesPaths) {
-            val file = File(filePath)
-            val durationMs = probeFileLength(file) ?: continue
-    
-            val nextId: Int = metadata.value.chapters.maxOfOrNull { it.id }?.plus(1) ?: 0
-            val sourceId = metadata.value.sources.maxOfOrNull { it.id }?.plus(1) ?: 0
-    
-            metadata.value.sources.add(AudioSource(id = sourceId, path = file.path, durationMs = durationMs))
-            metadata.value.chapters.add(Chapter(id = nextId, title = file.nameWithoutExtension, startTime = 0, endTime = convertMsToTimebase(durationMs, metadata.value.timeBase), sourceId = sourceId))
-        }
+        pickFilesAsync(
+            formats = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma"),
+            onResult = { files -> 
+                for (file in files) {
+                    val file = File(file)
+                    val durationMs = probeFileLength(file) ?: continue
+                    
+                    val nextId: Int = metadata.value.chapters.maxOfOrNull { it.id }?.plus(1) ?: 0
+                    val sourceId = metadata.value.sources.maxOfOrNull { it.id }?.plus(1) ?: 0
+            
+                    val metadataFilePath = exportMetadataToFile(file.path)
+                    val lines = File(metadataFilePath).readLines()
+                    val parsed = parseFfmetadata(lines, metadata.value.timeBase)
+                    
+                    metadata.value.sources.add(AudioSource(id = sourceId, path = file.path, durationMs = durationMs))
+                    
+                    if (parsed.chapters.isNotEmpty()) {
+                        for (i in parsed.chapters.indices) {
+                            metadata.value.chapters.add(Chapter(id = nextId + i, title = parsed.chapters[i].title, startTime = parsed.chapters[i].startTime, endTime = parsed.chapters[i].endTime, sourceId = sourceId))
+                        }
+                    } else {
+                        metadata.value.chapters.add(Chapter(id = nextId + 1, title = file.nameWithoutExtension, startTime = 0, endTime = convertMsToTimebase(durationMs, metadata.value.timeBase), sourceId = sourceId))
+                    }
+                    
+            
+//                    metadata.value.chapters.add(Chapter(id = nextId, title = file.nameWithoutExtension, startTime = 0, endTime = convertMsToTimebase(durationMs, metadata.value.timeBase), sourceId = sourceId))
+                }
+            }
+        )
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -177,7 +197,11 @@ fun AppContent() {
                                         metadata.value.chapters.add(chapter)
                                     },
                                     onChapterChange = { chapter ->
-                                        val chapterIndex = metadata.value.chapters.indexOf(chapter)
+                                        val chapterIndex = metadata.value.chapters.indexOfFirst { it.id == chapter.id }
+                                        if (chapterIndex == -1) {
+                                            return@AudioSourceCard
+                                        }
+                                        
                                         metadata.value.chapters[chapterIndex] = metadata.value.chapters[chapterIndex].copy(title = chapter.title, startTime = chapter.startTime, endTime = chapter.endTime)
                                     },
                                     onChapterDelete = { chapter ->
@@ -259,7 +283,7 @@ fun FileMetadata(metadata: MutableState<Metadata>, onChange: (Metadata) -> Unit)
                     label = { Text("Time base") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                     modifier = Modifier
-                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                         .widthIn(min = 280.dp, max = 280.dp)
                         .padding(2.dp, 0.dp)
                 )
@@ -443,24 +467,82 @@ fun ChapterCard(box: Chapter, onChange: (Chapter) -> Unit, onDelete: () -> Unit)
 }
 
 fun getMetadataFromFile(metadata: Metadata, onChange: (Metadata) -> Unit) {
-    val filePaths = selectFile()
+    var filePaths: List<String> = emptyList()
+    pickFilesAsync(
+        formats = setOf("mp3", "flac", "m4a", "m4b", "aac", "ogg", "opus", "wav", "wma"),
+        onResult = { files -> filePaths = files }
+    )
+    
     getMetadataFromFile(filePaths, metadata, onChange)
 }
 
 fun getMetadataFromFile(filePaths: List<String>, metadata: Metadata, onChange: (Metadata) -> Unit) {
+    val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
+    
     for (filePath in filePaths) {
         if (File(filePath).extension.equals("txt", ignoreCase = true)) {
             mapMetadataFile(File(filePath), metadata, onChange)
             continue
         }
-        
-        val file = File(filePath).absoluteFile.parentFile ?: File(".")
-        val tmpDir = kotlin.io.path.createTempDirectory("ChapterEditor")
-        val metadataFilePath = "$tmpDir/metadata.txt"
-        
-        listOf("ffmpeg", "-i", filePath, "-f", "ffmetadata", metadataFilePath).runCommand(file)
+
+        val metadataFilePath = exportMetadataToFile(filePath, tmpDir)
         mapMetadataFile(File(metadataFilePath), metadata, onChange)
     }
+}
+
+fun parseFfmetadata(lines: List<String>, timebase: String): ParsedMetadata {
+    val tags = mutableMapOf<String, String>()
+    val raw = mutableListOf<RawChapter>()
+    var section: String? = null
+    
+    for (line in lines) {
+        val trimmed = line.trim()
+        if (trimmed.isEmpty() || trimmed.startsWith(";") || trimmed.startsWith("#")) continue
+        
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            section = trimmed
+            if (section == "[CHAPTER]") raw.add(RawChapter())
+            continue
+        }
+        
+        if ('=' !in trimmed) continue
+        
+        val key = trimmed.substringBefore('=')
+        val value = unescapeFfmetadata(trimmed.substringAfter('='))
+        
+        when (section) {
+            null -> { tags[key] = value }
+            "[CHAPTER]" -> {
+                val last = raw.last()
+
+                when (key.lowercase()) {
+                    "timebase" -> { last.timebase = value }
+                    "start" -> { last.start = value.toLongOrNull() ?: 0 }
+                    "end" -> { last.end = value.toLongOrNull() ?: 0 }
+                    "title" -> { last.title = value }
+                }
+            }
+            else -> continue
+        }
+    }
+    
+    val chapters = raw.mapIndexed { index, r -> 
+        val convertedStart = convertTimebase(r.start, r.timebase, timebase)
+        val convertedEnd = convertTimebase(r.end, r.timebase, timebase)
+        
+        Chapter(id = index, title = r.title, startTime = convertedStart, endTime = convertedEnd)
+    }
+    
+    return ParsedMetadata(chapters, tags)
+}
+
+fun convertTimebase(value: Long, from: String, to: String): Long {
+    val fromNum = from.substringBefore('/').toBigInteger()
+    val fromTimebase = from.substringAfter('/').toBigInteger()
+    val toNum = to.substringBefore('/').toBigInteger()
+    val toTimebase = to.substringAfter('/').toBigInteger()
+
+    return (value.toBigInteger() * fromNum * toTimebase / (fromTimebase * toNum)).toLong()
 }
 
 fun mapMetadataFile(file: File, metadata: Metadata, onChange: (Metadata) -> Unit) {
@@ -523,27 +605,27 @@ fun buildMetadataContent(metadata: Metadata): String {
                 "encoder=Lavf63.1.100\n"
 
     if (metadata.date.isNotBlank())
-        content += "date=${metadata.date}\n"
+        content += "date=${escapeFfmetadata(metadata.date)}\n"
     if (metadata.title.isNotBlank())
-        content += "title=${metadata.title}\n"
+        content += "title=${escapeFfmetadata(metadata.title)}\n"
     if (metadata.artist.isNotBlank())
-        content += "artist=${metadata.artist}\n"
+        content += "artist=${escapeFfmetadata(metadata.artist)}\n"
     if (metadata.album.isNotBlank())
-        content += "album=${metadata.album}\n"
+        content += "album=${escapeFfmetadata(metadata.album)}\n"
     if (metadata.albumArtist.isNotBlank())
-        content += "album_artist=${metadata.albumArtist}\n"
+        content += "album_artist=${escapeFfmetadata(metadata.albumArtist)}\n"
     if (metadata.comment.isNotBlank())
-        content += "comment=${metadata.comment}\n"
+        content += "comment=${escapeFfmetadata(metadata.comment)}\n"
     if (metadata.composer.isNotBlank())
-        content += "composer=${metadata.composer}\n"
+        content += "composer=${escapeFfmetadata(metadata.composer)}\n"
 
     for (chapter in resolveChapterTimestamp(metadata)){
         val chapterString =
                     "[CHAPTER]\n" +
-                    "TIMEBASE=${metadata.timeBase}\n" +
+                    "TIMEBASE=${escapeFfmetadata(metadata.timeBase)}\n" +
                     "START=${chapter.startTime}\n" +
                     "END=${chapter.endTime}\n" +
-                    "title=${chapter.title}\n"
+                    "title=${escapeFfmetadata(chapter.title)}\n"
 
         content += chapterString
     }
